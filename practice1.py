@@ -497,20 +497,26 @@ def main():
     print("PRÁCTICA 1 - VISUALIZACIÓN Y ANÁLISIS BÁSICO DE IMÁGENES MÉDICAS")
     print("="*70)
     
-    # Configurar rutas específicas de Rubén
-    dicom_folder = r"C:\Users\ruben\Videos\Universidad\UE_practice1_2024-06-27\case_practice1\serie"
-    nifti_file = r"C:\Users\ruben\Videos\Universidad\UE_practice1_2024-06-27\case_practice1\image.nii.gz"
-    segmentation_file = r"C:\Users\ruben\Videos\Universidad\UE_practice1_2024-06-27\case_practice1\segmentation.nii.gz"
+    # Configurar rutas relativas al directorio actual
+    from pathlib import Path
+    
+    current_dir = Path.cwd()
+    print(f"Directorio de trabajo: {current_dir}")
+    
+    # Configurar rutas usando directorio actual
+    dicom_folder = current_dir / "case_practice1" / "serie"
+    nifti_file = current_dir / "case_practice1" / "image.nii.gz"
+    segmentation_file = current_dir / "case_practice1" / "segmentation.nii.gz"
     
     # Verificar que las rutas existen
     print("Verificando rutas de archivos...")
-    if not os.path.exists(dicom_folder):
+    if not dicom_folder.exists():
         print(f"ERROR: No se encontró la carpeta DICOM: {dicom_folder}")
         return
-    if not os.path.exists(nifti_file):
+    if not nifti_file.exists():
         print(f"ERROR: No se encontró el archivo NIfTI: {nifti_file}")
         return
-    if not os.path.exists(segmentation_file):
+    if not segmentation_file.exists():
         print(f"ERROR: No se encontró el archivo de segmentación: {segmentation_file}")
         return
     
@@ -529,7 +535,7 @@ def main():
         print("="*50)
         
         # Cargar serie DICOM
-        dicom_data = processor.load_dicom_series(dicom_folder)
+        dicom_data = processor.load_dicom_series(str(dicom_folder))
         
         # Extraer metadatos y guardar CSV
         metadata_df = processor.extract_dicom_metadata()
@@ -545,7 +551,7 @@ def main():
         print("="*50)
         
         # Cargar datos NIfTI y segmentación
-        nifti_data, seg_data = processor.load_nifti_data(nifti_file, segmentation_file)
+        nifti_data, seg_data = processor.load_nifti_data(str(nifti_file), str(segmentation_file))
         
         # Visualizar con segmentación superpuesta
         processor.visualize_nifti_with_segmentation()
