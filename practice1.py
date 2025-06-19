@@ -78,45 +78,64 @@ class MedicalImageProcessor:
         print(f"   Total de cortes cargados: {len(self.dicom_data)}")
         return self.dicom_data
     
+
     def extract_dicom_metadata(self, save_csv=True):
         """
-        b) Extrae metadatos de los archivos DICOM y los guarda en CSV
+        b) Extrae metadatos de UN ÚNICO corte (slice) y los guarda en CSV
         """
-        print("\nb) Extrayendo metadatos DICOM...")
+        print("\nb) Extrayendo metadatos DICOM de un único corte...")
         
-        metadata_list = []
-        for i, ds in enumerate(self.dicom_data):
-            metadata = {
-                'Slice_Number': i + 1,
-                'PatientID': getattr(ds, 'PatientID', 'Unknown'),
-                'StudyDate': getattr(ds, 'StudyDate', 'Unknown'),
-                'SeriesDescription': getattr(ds, 'SeriesDescription', 'Unknown'),
-                'Manufacturer': getattr(ds, 'Manufacturer', 'Unknown'),
-                'SliceLocation': getattr(ds, 'SliceLocation', 'Unknown'),
-                'SliceThickness': getattr(ds, 'SliceThickness', 'Unknown'),
-                'PixelSpacing': str(getattr(ds, 'PixelSpacing', 'Unknown')),
-                'ImagePosition': str(getattr(ds, 'ImagePositionPatient', 'Unknown')),
-                'ImageOrientation': str(getattr(ds, 'ImageOrientationPatient', 'Unknown')),
-                'Rows': getattr(ds, 'Rows', 'Unknown'),
-                'Columns': getattr(ds, 'Columns', 'Unknown'),
-                'WindowCenter': getattr(ds, 'WindowCenter', 'Unknown'),
-                'WindowWidth': getattr(ds, 'WindowWidth', 'Unknown')
-            }
-            metadata_list.append(metadata)
+        ds = self.dicom_data[0]
         
-        # Crear DataFrame y guardar CSV
-        df_metadata = pd.DataFrame(metadata_list)
+        # Función para limpiar valores DICOM
+        def clean_dicom_value(value):
+            if value is None:
+                return 'Unknown'
+            # Convertir a string y limpiar caracteres problemáticos
+            str_value = str(value).strip()
+            # Remover caracteres que pueden causar problemas en CSV
+            str_value = str_value.replace(',', ';').replace('\n', ' ').replace('\r', ' ')
+            return str_value if str_value else 'Unknown'
+        
+        # Extraer y limpiar los 4 metadatos requeridos
+        metadata = {
+            'PatientID': clean_dicom_value(getattr(ds, 'PatientID', None)),
+            'StudyDate': clean_dicom_value(getattr(ds, 'StudyDate', None)),
+            'SeriesDescription': clean_dicom_value(getattr(ds, 'SeriesDescription', None)),
+            'Manufacturer': clean_dicom_value(getattr(ds, 'Manufacturer', None))
+        }
+        
+        # Crear DataFrame con UN SOLO registro
+        df_metadata = pd.DataFrame([metadata])
         
         if save_csv:
             csv_filename = f"{self.case_name}_metadata.csv"
-            df_metadata.to_csv(csv_filename, index=False)
+            
+            # Escribir CSV con punto y coma para Excel en español/europeo
+            with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as f:
+                # Escribir encabezados separados por punto y coma
+                f.write("PatientID;StudyDate;SeriesDescription;Manufacturer\n")
+                
+                # Escribir datos separados por punto y coma
+                f.write(f"{metadata['PatientID']};{metadata['StudyDate']};{metadata['SeriesDescription']};{metadata['Manufacturer']}\n")
+            
             print(f"   Metadatos guardados en: {csv_filename}")
+            
+            # Verificar contenido del archivo
+            print("   Contenido del CSV:")
+            with open(csv_filename, 'r', encoding='utf-8-sig') as f:
+                lines = f.readlines()
+                for i, line in enumerate(lines):
+                    print(f"   Fila {i+1}: {line.strip()}")
+                    
+            print(f"   ✓ CSV creado con 4 columnas separadas por punto y coma")
         
         # Mostrar información resumida
-        print(f"   PatientID: {df_metadata['PatientID'].iloc[0]}")
-        print(f"   StudyDate: {df_metadata['StudyDate'].iloc[0]}")
-        print(f"   SeriesDescription: {df_metadata['SeriesDescription'].iloc[0]}")
-        print(f"   Manufacturer: {df_metadata['Manufacturer'].iloc[0]}")
+        print(f"   PatientID: {metadata['PatientID']}")
+        print(f"   StudyDate: {metadata['StudyDate']}")
+        print(f"   SeriesDescription: {metadata['SeriesDescription']}")
+        print(f"   Manufacturer: {metadata['Manufacturer']}")
+        print(f"   Metadatos extraídos del primer slice")
         
         return df_metadata
     
@@ -128,6 +147,50 @@ class MedicalImageProcessor:
         
         if not self.dicom_data:
             raise ValueError("Primero debe cargar los datos DICOM")
+        
+        # Determinación de orientación
+        print("   Determinando orientación del plano usando producto vectorial...")
+        
+        # Obtener ImageOrientationPatient del primer slice
+        first_slice = self.dicom_data[0]
+        if hasattr(first_slice, 'ImageOrientationPatient'):
+            orientation = first_slice.ImageOrientationPatient
+            
+            # Vectores de dirección (6 valores: [Xx, Xy, Xz, Yx, Yy, Yz])
+            row_vector = np.array([float(orientation[0]), float(orientation[1]), float(orientation[2])])  # X direction
+            col_vector = np.array([float(orientation[3]), float(orientation[4]), float(orientation[5])])  # Y direction
+            
+            # Producto vectorial = dirección normal al plano
+            normal_vector = np.cross(row_vector, col_vector)
+            
+            print(f"   • Vector fila (X): {row_vector}")
+            print(f"   • Vector columna (Y): {col_vector}")
+            print(f"   • Vector normal (producto vectorial): {normal_vector}")
+            
+            # Determinar orientación basada en la componente dominante del vector normal
+            abs_normal = np.abs(normal_vector)
+            max_component = np.argmax(abs_normal)
+            
+            if max_component == 0:  # Componente X dominante
+                plane_orientation = "SAGITAL"
+                plane_description = "Plano perpendicular al eje X (vista lateral)"
+            elif max_component == 1:  # Componente Y dominante  
+                plane_orientation = "CORONAL"
+                plane_description = "Plano perpendicular al eje Y (vista frontal)"
+            else:  # Componente Z dominante
+                plane_orientation = "AXIAL"
+                plane_description = "Plano perpendicular al eje Z (vista transversal)"
+            
+            print(f"   • ORIENTACIÓN DETECTADA: {plane_orientation}")
+            print(f"   • Descripción: {plane_description}")
+            print(f"   • Componente dominante: {['X', 'Y', 'Z'][max_component]} = {normal_vector[max_component]:.3f}")
+            
+        else:
+            print("   Warning: ImageOrientationPatient no encontrado, asumiendo orientación AXIAL")
+            plane_orientation = "AXIAL (asumido)"
+            plane_description = "Orientación asumida por defecto"
+        
+        # ============================================================
         
         # Convertir DICOM a array 3D
         slices = []
@@ -159,7 +222,11 @@ class MedicalImageProcessor:
         
         # Crear figura con subplots
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(f'Visualización Multiplanar DICOM - {self.case_name}', fontsize=16, fontweight='bold')
+        
+        # ========== TÍTULO ACTUALIZADO CON ORIENTACIÓN ==========
+        fig.suptitle(f'Visualización Multiplanar DICOM - {self.case_name}\nOrientación Original: {plane_orientation}', 
+                    fontsize=16, fontweight='bold')
+        # ======================================================
         
         # Calcular cortes centrales
         z_center = volume.shape[0] // 2
@@ -194,7 +261,7 @@ class MedicalImageProcessor:
         axes[1,0].set_ylabel('Frecuencia')
         axes[1,0].grid(True, alpha=0.3)
         
-        # Estadísticas básicas
+        # ========== ESTADÍSTICAS ACTUALIZADAS CON ORIENTACIÓN ==========
         stats_text = f"""Estadísticas del Volumen:
         Dimensiones: {volume.shape}
         Voxeles totales: {volume.size:,}
@@ -203,11 +270,16 @@ class MedicalImageProcessor:
         Intensidad media: {volume.mean():.2f}
         Desviación estándar: {volume.std():.2f}
         Slices exitosos: {successful_slices}/{len(self.dicom_data)}
+        
+        ORIENTACIÓN DETECTADA:
+        • Plano original: {plane_orientation}
+        • {plane_description}
         """
+        # ============================================================
         
         axes[1,1].text(0.1, 0.5, stats_text, transform=axes[1,1].transAxes, 
-                      fontsize=11, verticalalignment='center',
-                      bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+                    fontsize=11, verticalalignment='center',
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
         axes[1,1].set_title('Estadísticas del Volumen')
         axes[1,1].axis('off')
         
@@ -470,9 +542,6 @@ class MedicalImageProcessor:
         • {self.case_name}_nifti_segmentation.png
         • {self.case_name}_final_report.png
         
-        PUNTUACIÓN:
-        Todos los requisitos cumplidos
-        Puntuación esperada: 10/10
         """
         
         axes[1,1].text(0.05, 0.95, case_info, transform=axes[1,1].transAxes, 
